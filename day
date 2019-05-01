@@ -2,7 +2,7 @@
 
 # Command line utility for basic calendar calculations.
 
-IDENT = 'day 1.0.0 (2019-05-01)'
+IDENT = 'day 1.0.1 (2019-05-02)'
 
 COPYRIGHT = <<"EOF"
 Copyright (c) 2019 by Riley S. Faelan.
@@ -145,7 +145,7 @@ begin
     ['--version', GetoptLong::NO_ARGUMENT],
   ).each do |opt, arg|
     case opt
-    when '--month-form', '--week-form', '-day-form' then
+    when '--month-form', '--week-form', '--day-form' then
       $cmdline[:form] = DATE_FORMS[opt]
     when '--undashed' then
       $cmdline[:undashed] = true
