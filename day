@@ -1,0 +1,241 @@
+#! /usr/bin/ruby
+
+# Command line utility for basic calendar calculations.
+
+IDENT = 'day 1.0.0 (2019-05-01)'
+
+COPYRIGHT = <<"EOF"
+Copyright (c) 2019 by Riley S. Faelan.
+
+License: GNU GPL version 3 or later (see
+<http://gnu.org/licenses/gpl.html>).
+
+This is free software: you are free to change and
+redistribute it. There is NO WARRANTY, to the extent
+permitted by law.
+EOF
+
+HELP = <<"EOF"
+day -- calendar calculations
+
+Usage:
+
+  day [-mwdu]
+      Output today's date in the specified form.
+
+  day [-mwdu] date
+      Parse the given date and output it in the specified
+      form.
+
+  day [-mwdu] [base_date] +|- number_of_days
+      Parse the given date, add or subtract the given number
+      of days, and output the resulting date in the
+      specified form.
+
+  day [-mwdu] [base_date] +|- duration
+      Parse the given date, add or subtract the given
+      duration, and output the resulting date in the
+      specified form.  Duration is given in the form
+      [[n]P][nY][nM][nW][nD], and can contain an integral
+      number of years, months, weeks, and days
+      correspondingly; at least one unit must be specified.
+      Fractional units are not supported.  Leading P is
+      permitted and ignored; if it's present, it may be
+      preceded by a number of such durations to apply. (The
+      result of this may differ from applying the duration
+      that number of times due to different lengths of
+      months.)
+
+  day [-r] [base_date] : another_date
+      Output the number of days counting from base_date,
+      inclusive, to another_date, exclusive. Reverse the
+      sign of the difference if -r is given.
+
+  If base_date is not given, the current date is used by
+  default.
+   
+
+Output form selection
+
+  -m, --month-form
+      select the yyyy-mm-dd output form
+
+  -w, --week-form
+      select the yyyy-Www-d output form
+
+  -d, --day-form
+      select the yyyy-ddd output form
+
+  Input dates can be given in any of these three ISO 8601
+  forms, either with or without dashes.
+
+  -u, --undashed
+      do not output dashes in the output date
+
+
+Other options
+
+  -r, --reverse
+      reverse the sign of the result when subtracting dates
+
+  --help
+      display this help and exit
+
+  --version
+      output version information and exit
+
+EOF
+
+require 'date'
+require 'getoptlong'
+
+DATE_FORMS = {
+  # For each of the ISO 8601 forms, |date_format| is the
+  # |strftime| format for the full date. |year_format| is
+  # the |strftime| format for only the year field, used to
+  # check aganst year overflow.
+  '--month-form' => {
+    year_format: '%Y',
+    date_format: '%Y-%m-%d',
+  },
+  '--week-form' => {
+    year_format: '%G',
+    date_format: '%G-W%V-%u',
+  },
+  '--day-form' => {
+    year_format: '%Y',
+    date_format: '%Y-%j',
+  },
+}
+
+DATE_RE = %r{\A
+  (
+    # In dashed format, year numbers longer than four digits
+    # are acceptable
+    \d{4,}-(\d\d-\d\d|W\d\d-\d|\d\d\d) |
+    \d\d\d\d(\d\d\d\d|W\d\d\d|\d\d\d)
+  )
+\z}ix
+
+DURATION_RE = %r{\A
+  ((?<p>\d+)?P)?
+  (?!\z)
+  ((?<y>[+-]?\d+)Y)?
+  ((?<m>[+-]?\d+)M)?
+  ((?<w>[+-]?\d+)W)?
+  ((?<d>[+-]?\d+)D)?
+\z}ix
+
+$0 = 'day'
+
+$cmdline = {
+  undashed: false,
+  reverse: false,
+  form: DATE_FORMS['--month-form'],
+}
+
+begin
+  GetoptLong.new(
+    ['--month-form', '-m', GetoptLong::NO_ARGUMENT],
+    ['--week-form', '-w', GetoptLong::NO_ARGUMENT],
+    ['--day-form', '-d', GetoptLong::NO_ARGUMENT],
+    ['--undashed', '-u', GetoptLong::NO_ARGUMENT],
+    ['--reverse', '-r', GetoptLong::NO_ARGUMENT],
+    ['--help', GetoptLong::NO_ARGUMENT],
+    ['--version', GetoptLong::NO_ARGUMENT],
+  ).each do |opt, arg|
+    case opt
+    when '--month-form', '--week-form', '-day-form' then
+      $cmdline[:form] = DATE_FORMS[opt]
+    when '--undashed' then
+      $cmdline[:undashed] = true
+    when '--reverse' then
+      $cmdline[:reverse] = true
+    when '--help' then
+      puts HELP
+      exit 0
+    when '--version' then
+      puts IDENT
+      puts
+      puts COPYRIGHT
+      exit 0
+    end
+  end
+rescue GetoptLong::InvalidOption,
+    GetoptLong::MissingArgument
+  # the error has already been reported by |GetoptLong#each|
+  exit 1
+end
+
+def parse_date_or_die s
+  begin
+    return Date.parse s, false # do NOT do Y2K compensation
+  rescue ArgumentError
+    $stderr.puts "day: #{s}: invalid date"
+    exit 1
+  end
+end
+
+if ARGV[0] and ARGV[0] =~ DATE_RE then
+  $x = parse_date_or_die ARGV[0]
+  ARGV.shift
+else
+  $x = Date.today
+end
+
+if ARGV.length == 0 then
+  # nothing further
+elsif ARGV.length == 2 and
+  # add or subtract a number of days
+    ARGV[0] =~ /\A[+-]\z/ and
+    ARGV[1] =~ /\A\d+\z/ then
+  $x += (ARGV[0] + ARGV[1]).to_i
+elsif ARGV.length == 2 and
+    ARGV[0] =~ /\A[+-]\z/ and
+    ARGV[1] =~ DURATION_RE then
+  # add or subtract a duration
+  $factor = (ARGV[0] + '1').to_i
+  $factor *= $~['p'].to_i if $~['p']
+  $x = $x.next_year $~['y'].to_i * $factor if $~['y']
+  $x = $x.next_month $~['m'].to_i * $factor if $~['m']
+  $x += $~['w'].to_i * 7 * $factor if $~['w']
+  $x += $~['d'].to_i * $factor if $~['d']
+elsif ARGV.length == 2 and
+    ARGV[0] == ':' and
+    ARGV[1] =~ DATE_RE then
+  # subtract dates
+  $x = parse_date_or_die(ARGV[1]) - $x
+  $x = $x.to_i # convert from |Rational| to integer
+  $x = -$x if $cmdline[:reverse]
+else
+  $stderr.puts "day: command line parse error"
+  exit 1
+end
+
+case $x
+when Date then
+  # Check for year overflow. We'll reject negative year
+  # numbers, since parsing such back is hairy in context of
+  # the Unix custom of using leading dashes to mark options,
+  # and if |--undashed| is in use, we'll also reject year
+  # numbers that do not fit into four digits, since without
+  # separators, it would be impossible to parse such numbers
+  # back correctly.  (There's an exception: |nnnnnWnnn|
+  # could be correctly parsed. Unfortunately, as of
+  # 2.3.3p222, Ruby's |Date.parse| barfs at it, so we'll
+  # reject that, too)
+  y = $x.strftime $cmdline[:form][:year_format]
+  unless y =~ ($cmdline[:undashed] ?
+      /\A\d{4}\z/ : /\A\d{4,}\z/) then
+    $stderr.puts "day: #{y}: year overflow"
+    exit 1
+  end
+
+  f = $cmdline[:form][:date_format]
+  f = f.gsub '-', '' if $cmdline[:undashed]
+  puts $x.strftime(f)
+when Integer then
+  puts $x
+else
+  raise 'assertion failed'
+end
